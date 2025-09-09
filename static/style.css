@@ -70,13 +70,81 @@ button svg {
   stroke-width: 2.2;
 }
 
-progress {
+/* Progress Bar Styles */
+.progress-container {
   width: 100%;
-  height: 10px;
-  border-radius: 5px;
-  background: #232323;
-  accent-color: #1DB954;
-  margin-bottom: 0.5rem;
+}
+
+.progress-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progress-bar {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  background: #333;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: height 0.2s ease;
+}
+
+.progress-bar:hover {
+  height: 12px;
+}
+
+.progress-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #1DB954, #1ed760);
+  border-radius: 4px;
+  width: 0%;
+  transition: width 0.1s ease;
+}
+
+.progress-handle {
+  position: absolute;
+  top: 50%;
+  left: 0%;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border: 2px solid #1DB954;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  cursor: grab;
+}
+
+.progress-handle:hover {
+  transform: translate(-50%, -50%) scale(1.2);
+}
+
+.progress-bar:hover .progress-handle {
+  opacity: 1;
+}
+
+.progress-handle:active {
+  cursor: grabbing;
+}
+
+.time-display {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  color: #b3b3b3;
+  font-family: 'Courier New', monospace;
+}
+
+#current-time {
+  color: #1DB954;
+  font-weight: 500;
 }
 
 #status-rec, #status-play {
@@ -84,12 +152,6 @@ progress {
   font-size: 1.1rem;
   color: #1DB954;
   min-height: 1.2em;
-}
-
-#time-display {
-  color: #b3b3b3;
-  font-size: 1rem;
-  margin-left: 10px;
 }
 
 .device-options {

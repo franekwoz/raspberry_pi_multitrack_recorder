@@ -50,9 +50,17 @@
       <img src="/static/icons/next.svg" alt="Next" />
     </button>
     <p id="status-play"></p>
-    <div style="margin-top:10px;">
-      <progress id="progress-bar" value="0" max="1"></progress>
-      <span id="time-display">00:00 / 00:00</span>
+    <div class="progress-container" style="margin-top:15px;">
+      <div class="progress-wrapper">
+        <div id="progress-bar" class="progress-bar">
+          <div id="progress-fill" class="progress-fill"></div>
+          <div id="progress-handle" class="progress-handle"></div>
+        </div>
+        <div class="time-display">
+          <span id="current-time">00:00</span>
+          <span id="total-time">00:00</span>
+        </div>
+      </div>
     </div>
     <!-- <audio id="audio-player" style="display:none;"></audio> -->
   </div>
@@ -124,7 +132,13 @@
 
     // Playback
     const progressBar = document.getElementById('progress-bar');
-    const timeDisplay = document.getElementById('time-display');
+    const progressFill = document.getElementById('progress-fill');
+    const progressHandle = document.getElementById('progress-handle');
+    const currentTimeDisplay = document.getElementById('current-time');
+    const totalTimeDisplay = document.getElementById('total-time');
+    
+    let isDragging = false;
+    let currentPosition = 0;
     
     function formatTime(sec) {
       sec = Math.floor(sec);
@@ -133,15 +147,32 @@
       return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
 
+    function updateProgressBar(progress) {
+      const percentage = Math.max(0, Math.min(100, progress * 100));
+      progressFill.style.width = percentage + '%';
+      progressHandle.style.left = percentage + '%';
+    }
+
+    function updateTimeDisplay(current, total) {
+      currentTimeDisplay.textContent = formatTime(current);
+      totalTimeDisplay.textContent = formatTime(total);
+    }
+
     function updateProgressSim() {
       if (playStartTime === null || playDuration === 0) {
-        progressBar.value = 0;
-        timeDisplay.innerText = `00:00 / 00:00`;
+        updateProgressBar(0);
+        updateTimeDisplay(0, 0);
         return;
       }
       const elapsed = Math.min((Date.now() - playStartTime) / 1000, playDuration);
-      progressBar.value = elapsed / playDuration;
-      timeDisplay.innerText = `${formatTime(elapsed)} / ${formatTime(playDuration)}`;
+      const progress = elapsed / playDuration;
+      currentPosition = elapsed;
+      
+      if (!isDragging) {
+        updateProgressBar(progress);
+      }
+      updateTimeDisplay(elapsed, playDuration);
+      
       if (elapsed >= playDuration) {
         clearInterval(playTimer);
         playTimer = null;
@@ -151,6 +182,83 @@
         document.getElementById('btn-next').disabled = true;
       }
     }
+
+    // Progress bar click to seek
+    function handleProgressClick(event) {
+      if (playDuration === 0) return;
+      
+      const rect = progressBar.getBoundingClientRect();
+      const clickX = event.clientX - rect.left;
+      const percentage = clickX / rect.width;
+      const seekTime = percentage * playDuration;
+      
+      seekTo(seekTime);
+    }
+
+    // Seek functionality
+    async function seekTo(time) {
+      if (!isPlaying || playDuration === 0) return;
+      
+      const seekPercentage = time / playDuration;
+      currentPosition = time;
+      playStartTime = Date.now() - (time * 1000);
+      
+      updateProgressBar(seekPercentage);
+      updateTimeDisplay(time, playDuration);
+      
+      // Send seek command to backend
+      try {
+        await fetch('/seek', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ 
+            filename: currentFile, 
+            position: time,
+            device: document.querySelector('input[name="device"]:checked').value
+          })
+        });
+      } catch (error) {
+        console.error('Seek failed:', error);
+      }
+    }
+
+    // Progress bar drag functionality
+    function handleMouseDown(event) {
+      if (playDuration === 0) return;
+      isDragging = true;
+      progressBar.style.cursor = 'grabbing';
+      handleMouseMove(event);
+    }
+
+    function handleMouseMove(event) {
+      if (!isDragging || playDuration === 0) return;
+      
+      const rect = progressBar.getBoundingClientRect();
+      const mouseX = event.clientX - rect.left;
+      const percentage = Math.max(0, Math.min(1, mouseX / rect.width));
+      const seekTime = percentage * playDuration;
+      
+      updateProgressBar(percentage);
+      updateTimeDisplay(seekTime, playDuration);
+    }
+
+    function handleMouseUp() {
+      if (!isDragging) return;
+      isDragging = false;
+      progressBar.style.cursor = 'pointer';
+      
+      if (playDuration > 0) {
+        const percentage = parseFloat(progressFill.style.width) / 100;
+        const seekTime = percentage * playDuration;
+        seekTo(seekTime);
+      }
+    }
+
+    // Event listeners for progress bar
+    progressBar.addEventListener('click', handleProgressClick);
+    progressBar.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
 
     document.getElementById('btn-play').onclick = async () => {
       const btnPlay = document.getElementById('btn-play');

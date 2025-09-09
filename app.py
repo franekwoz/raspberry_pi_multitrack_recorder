@@ -185,5 +185,55 @@ def get_duration(filename):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/seek', methods=['POST'])
+def seek_position():
+    with lock:
+        proc = task.get('process')
+        if not proc or task.get('mode') != 'play':
+            return jsonify(status='error', message='Not playing'), 400
+        
+        filename = request.json.get('filename')
+        position = request.json.get('position', 0)
+        device = request.json.get('device', 'xr18')
+        
+        if not filename:
+            return jsonify(status='error', message='No file specified'), 400
+            
+        filepath = os.path.join(app.config['RECORDINGS_DIR'], filename)
+        if not os.path.exists(filepath):
+            return jsonify(status='error', message='File not found'), 404
+        
+        # Stop current playback
+        proc.send_signal(signal.SIGINT)
+        proc.wait()
+        
+        # Calculate seek position in bytes (approximate)
+        try:
+            with contextlib.closing(wave.open(filepath, 'rb')) as wf:
+                rate = wf.getframerate()
+                channels = wf.getnchannels()
+                sample_width = wf.getsampwidth()
+                # Calculate bytes per second
+                bytes_per_second = rate * channels * sample_width
+                seek_bytes = int(position * bytes_per_second)
+        except Exception as e:
+            return jsonify(status='error', message=f'Error calculating seek position: {str(e)}'), 500
+        
+        # Restart playback from seek position using dd to skip bytes
+        if device == 'xr18':
+            cmd = ['bash', '-c', f'dd if="{filepath}" bs=1 skip={seek_bytes} 2>/dev/null | aplay -D hw:3,0 -']
+        elif device == 'x32':
+            cmd = ['bash', '-c', f'dd if="{filepath}" bs=1 skip={seek_bytes} 2>/dev/null | aplay -D hw:XUSB,0 -c 32 -r 48000 -f S32_LE -']
+        else:
+            return jsonify(status='error', message='Invalid device selection'), 400
+        
+        try:
+            proc = subprocess.Popen(cmd, shell=False)
+            task['process'] = proc
+            task['mode'] = 'play'
+            return jsonify(status='seeking', position=position, file=filename)
+        except Exception as e:
+            return jsonify(status='error', message=f'Seek failed: {str(e)}'), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
