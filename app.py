@@ -5,6 +5,8 @@ import signal
 from threading import Lock
 import wave
 import contextlib
+import tempfile
+import uuid
 
 app = Flask(__name__)
 app.config['RECORDINGS_DIR'] = os.path.join(os.getcwd(), 'recordings')
@@ -15,6 +17,7 @@ if not os.path.exists(app.config['RECORDINGS_DIR']):
 task = {
     'process': None,
     'mode': None,  # 'record' or 'play'
+    'temp_file': None,  # temporary file for seeking
 }
 lock = Lock()
 
@@ -109,8 +112,18 @@ def stop_task():
         proc.send_signal(signal.SIGINT)
         proc.wait()
         mode = task['mode']
+        
+        # Clean up temporary file if it exists
+        temp_file = task.get('temp_file')
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except:
+                pass
+        
         task['process'] = None
         task['mode'] = None
+        task['temp_file'] = None
         return jsonify(status='stopped', mode=mode)
 
 @app.route('/play', methods=['POST'])
@@ -219,18 +232,22 @@ def seek_position():
         except Exception as e:
             return jsonify(status='error', message=f'Error calculating seek position: {str(e)}'), 500
         
-        # Try using sox for seeking (commonly available on Raspberry Pi)
+        # Use sox with temporary file for seeking
+        
+        temp_filename = f"seek_{uuid.uuid4().hex[:8]}.wav"
+        temp_filepath = os.path.join('/tmp', temp_filename)
+        
         try:
             if device == 'xr18':
-                # Use sox to trim from seek position and pipe to aplay
-                cmd = ['bash', '-c', f'sox "{filepath}" - trim {position} | aplay -D hw:3,0 -']
+                # Use sox to create trimmed file, then play it
+                cmd = ['bash', '-c', f'sox "{filepath}" "{temp_filepath}" trim {position} && aplay -D hw:3,0 "{temp_filepath}" && rm -f "{temp_filepath}"']
             elif device == 'x32':
-                # Use sox to trim from seek position and pipe to aplay with format
-                cmd = ['bash', '-c', f'sox "{filepath}" - trim {position} | aplay -D hw:XUSB,0 -c 32 -r 48000 -f S32_LE -']
+                # Use sox to create trimmed file, then play it with format
+                cmd = ['bash', '-c', f'sox "{filepath}" "{temp_filepath}" trim {position} && aplay -D hw:XUSB,0 -c 32 -r 48000 -f S32_LE "{temp_filepath}" && rm -f "{temp_filepath}"']
             else:
                 return jsonify(status='error', message='Invalid device selection'), 400
-        except:
-            # Fallback: restart from beginning if sox is not available
+        except Exception as e:
+            # Fallback: restart from beginning if sox fails
             if device == 'xr18':
                 cmd = ['aplay', '-D', 'hw:3,0', filepath]
             elif device == 'x32':
@@ -242,8 +259,18 @@ def seek_position():
             proc = subprocess.Popen(cmd, shell=False)
             task['process'] = proc
             task['mode'] = 'play'
+            
+            # Store temp file path for cleanup
+            task['temp_file'] = temp_filepath
+            
             return jsonify(status='seeking', position=position, file=filename)
         except Exception as e:
+            # Clean up temp file if process creation fails
+            if os.path.exists(temp_filepath):
+                try:
+                    os.remove(temp_filepath)
+                except:
+                    pass
             return jsonify(status='error', message=f'Seek failed: {str(e)}'), 500
 
 if __name__ == '__main__':
