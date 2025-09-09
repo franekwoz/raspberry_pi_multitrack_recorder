@@ -11,7 +11,7 @@ Update and install dependencies:
 
 ``` bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install python3 python3-pip python3-venv                  build-essential git                  alsa-utils sox                  libsndfile1-dev libasound2-dev -y
+sudo apt install python3 python3-pip python3-venv build-essential git alsa-utils sox libsndfile1-dev libasound2-dev -y
 ```
 
 ------------------------------------------------------------------------

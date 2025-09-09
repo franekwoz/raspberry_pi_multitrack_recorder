@@ -32,8 +32,13 @@ def index():
 @app.route('/record', methods=['POST'])
 def start_record():
     with lock:
+        # Stop any existing process before starting record
         if task['process']:
-            return jsonify(status='error', message='Already running'), 400
+            proc = task['process']
+            proc.send_signal(signal.SIGINT)
+            proc.wait()
+            task['process'] = None
+            task['mode'] = None
         filename = request.json.get('filename') or ''
         device = request.json.get('device', 'xr18')  # Default to xr18 if not specified
         
@@ -111,8 +116,13 @@ def stop_task():
 @app.route('/play', methods=['POST'])
 def start_play():
     with lock:
+        # Stop any existing process before starting play
         if task['process']:
-            return jsonify(status='error', message='Already running'), 400
+            proc = task['process']
+            proc.send_signal(signal.SIGINT)
+            proc.wait()
+            task['process'] = None
+            task['mode'] = None
         filename = request.json.get('filename')
         device = request.json.get('device', 'xr18')  # Default to xr18 if not specified
         
