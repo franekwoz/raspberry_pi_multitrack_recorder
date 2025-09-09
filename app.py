@@ -220,8 +220,6 @@ def get_duration(filename):
 def seek_position():
     with lock:
         proc = task.get('process')
-        if not proc or task.get('mode') != 'play':
-            return jsonify(status='error', message='Not playing'), 400
         
         filename = request.json.get('filename')
         position = request.json.get('position', 0)
@@ -234,60 +232,34 @@ def seek_position():
         if not os.path.exists(filepath):
             return jsonify(status='error', message='File not found'), 404
         
-        # Stop current playback more aggressively
-        try:
-            proc.send_signal(signal.SIGINT)
-            # Wait a bit for graceful shutdown
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            # Force kill if it doesn't stop gracefully
-            proc.kill()
-            proc.wait()
-        except:
-            # Process might already be dead
-            pass
-        
-        # Additional delay to ensure audio device is released
-        time.sleep(0.5)
-        # Proactively kill any stray aplay still holding the device
-        force_release_device(device)
-        
-        # Clean up any existing temp file
-        temp_file = task.get('temp_file')
-        if temp_file and os.path.exists(temp_file):
+        # If something is playing, stop it first
+        if proc:
             try:
-                os.remove(temp_file)
+                proc.send_signal(signal.SIGINT)
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
             except:
                 pass
         
-        # Calculate seek position in bytes (approximate)
-        try:
-            with contextlib.closing(wave.open(filepath, 'rb')) as wf:
-                rate = wf.getframerate()
-                channels = wf.getnchannels()
-                sample_width = wf.getsampwidth()
-                # Calculate bytes per second
-                bytes_per_second = rate * channels * sample_width
-                seek_bytes = int(position * bytes_per_second)
-        except Exception as e:
-            return jsonify(status='error', message=f'Error calculating seek position: {str(e)}'), 500
+        # Small delay to ensure audio device is released
+        time.sleep(0.15)
+        # Proactively kill any stray aplay still holding the device
+        force_release_device(device)
         
-        # Use sox with temporary file for seeking
-        
-        temp_filename = f"seek_{uuid.uuid4().hex[:8]}.wav"
-        temp_filepath = os.path.join('/tmp', temp_filename)
-        
+        # Use sox piping to aplay to avoid temp files and reduce latency
         try:
             if device == 'xr18':
-                # Use sox to create trimmed file, then play it
-                cmd = ['bash', '-c', f'sox "{filepath}" "{temp_filepath}" trim {position} && aplay -D hw:3,0 "{temp_filepath}" && rm -f "{temp_filepath}"']
+                # Pipe trimmed audio directly into aplay on XR18
+                cmd = ['bash', '-c', f'sox -V1 -q "{filepath}" -t wav - trim {position} | aplay -D hw:3,0 -']
             elif device == 'x32':
-                # Use sox to create trimmed file, then play it with format
-                cmd = ['bash', '-c', f'sox "{filepath}" "{temp_filepath}" trim {position} && aplay -D hw:XUSB,0 -c 32 -r 48000 -f S32_LE "{temp_filepath}" && rm -f "{temp_filepath}"']
+                # Pipe trimmed audio directly into aplay with explicit format for X32
+                cmd = ['bash', '-c', f'sox -V1 -q "{filepath}" -t wav - trim {position} | aplay -D hw:XUSB,0 -c 32 -r 48000 -f S32_LE -']
             else:
                 return jsonify(status='error', message='Invalid device selection'), 400
         except Exception as e:
-            # Fallback: restart from beginning if sox fails
+            # Fallback: restart from beginning if sox fails to construct
             if device == 'xr18':
                 cmd = ['aplay', '-D', 'hw:3,0', filepath]
             elif device == 'x32':
@@ -313,7 +285,6 @@ def seek_position():
                 if proc.poll() is None:  # Process is still running
                     task['process'] = proc
                     task['mode'] = 'play'
-                    task['temp_file'] = temp_filepath
                     return jsonify(status='seeking', position=position, file=filename)
                 else:
                     # Process exited immediately, might be device busy
@@ -330,12 +301,6 @@ def seek_position():
                     time.sleep(0.5)
                     continue
                 else:
-                    # Clean up temp file if all attempts failed
-                    if os.path.exists(temp_filepath):
-                        try:
-                            os.remove(temp_filepath)
-                        except:
-                            pass
                     return jsonify(status='error', message=f'Seek failed after {max_retries} attempts: {str(e)}'), 500
 
 if __name__ == '__main__':
