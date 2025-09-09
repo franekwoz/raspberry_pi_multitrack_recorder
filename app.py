@@ -256,6 +256,10 @@ def seek_position():
                 return jsonify(status='error', message='Invalid device selection'), 400
         
         try:
+            # Add some debugging
+            print(f"Seek command: {' '.join(cmd)}")
+            print(f"Seeking to position: {position} seconds")
+            
             proc = subprocess.Popen(cmd, shell=False)
             task['process'] = proc
             task['mode'] = 'play'
@@ -271,6 +275,7 @@ def seek_position():
                     os.remove(temp_filepath)
                 except:
                     pass
+            print(f"Seek error: {str(e)}")
             return jsonify(status='error', message=f'Seek failed: {str(e)}'), 500
 
 if __name__ == '__main__':

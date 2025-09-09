@@ -166,9 +166,10 @@
       }
       const elapsed = Math.min((Date.now() - playStartTime) / 1000, playDuration);
       const progress = elapsed / playDuration;
-      currentPosition = elapsed;
       
+      // Update current position only if not dragging
       if (!isDragging) {
+        currentPosition = elapsed;
         updateProgressBar(progress);
       }
       updateTimeDisplay(elapsed, playDuration);
@@ -201,8 +202,8 @@
       
       const seekPercentage = time / playDuration;
       currentPosition = time;
-      playStartTime = Date.now() - (time * 1000);
       
+      // Update visual progress immediately
       updateProgressBar(seekPercentage);
       updateTimeDisplay(time, playDuration);
       
@@ -219,10 +220,22 @@
         });
         
         const result = await response.json();
-        if (result.status === 'error') {
+        if (result.status === 'seeking') {
+          // Successfully seeking - reset the timer to match the new position
+          // Add small delay to ensure audio process has started
+          setTimeout(() => {
+            playStartTime = Date.now() - (time * 1000);
+            currentPosition = time;
+            console.log('Seek successful to position:', time);
+            document.getElementById('status-play').innerText = 'Playing: ' + currentFile + ' (Seeked to ' + formatTime(time) + ')';
+          }, 100);
+        } else if (result.status === 'error') {
           console.warn('Seek not fully supported:', result.message);
           // Update status to show seek limitation
           document.getElementById('status-play').innerText = 'Playing: ' + currentFile + ' (Seek: restart from beginning)';
+          // Reset timer to beginning since audio restarted
+          playStartTime = Date.now();
+          currentPosition = 0;
         }
       } catch (error) {
         console.error('Seek failed:', error);
