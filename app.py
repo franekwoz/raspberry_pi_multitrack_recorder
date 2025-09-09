@@ -22,6 +22,23 @@ task = {
 }
 lock = Lock()
 
+# Helper: aggressively release audio device if lingering aplay processes exist
+def force_release_device(selected_device: str) -> None:
+    try:
+        if selected_device == 'xr18':
+            pattern = 'hw:3,0'
+        elif selected_device == 'x32':
+            pattern = 'hw:XUSB,0'
+        else:
+            return
+        # Kill any aplay using the target device
+        subprocess.run(['bash', '-c', f'pkill -f "aplay -D {pattern}" || true'], check=False)
+        # Small wait to allow kernel to release the device nodes
+        time.sleep(0.2)
+    except Exception:
+        # Best-effort; ignore errors
+        pass
+
 # Utility: list recordings
 def list_recordings():
     files = [f for f in os.listdir(app.config['RECORDINGS_DIR']) if f.endswith('.wav')]
@@ -232,6 +249,8 @@ def seek_position():
         
         # Additional delay to ensure audio device is released
         time.sleep(0.5)
+        # Proactively kill any stray aplay still holding the device
+        force_release_device(device)
         
         # Clean up any existing temp file
         temp_file = task.get('temp_file')
@@ -283,6 +302,9 @@ def seek_position():
                 # Add some debugging
                 print(f"Seek command (attempt {attempt + 1}): {' '.join(cmd)}")
                 print(f"Seeking to position: {position} seconds")
+                
+                # Ensure device is free before each attempt
+                force_release_device(device)
                 
                 proc = subprocess.Popen(cmd, shell=False)
                 
