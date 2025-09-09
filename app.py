@@ -219,13 +219,24 @@ def seek_position():
         except Exception as e:
             return jsonify(status='error', message=f'Error calculating seek position: {str(e)}'), 500
         
-        # Restart playback from seek position using dd to skip bytes
-        if device == 'xr18':
-            cmd = ['bash', '-c', f'dd if="{filepath}" bs=1 skip={seek_bytes} 2>/dev/null | aplay -D hw:3,0 -']
-        elif device == 'x32':
-            cmd = ['bash', '-c', f'dd if="{filepath}" bs=1 skip={seek_bytes} 2>/dev/null | aplay -D hw:XUSB,0 -c 32 -r 48000 -f S32_LE -']
-        else:
-            return jsonify(status='error', message='Invalid device selection'), 400
+        # Try using sox for seeking (commonly available on Raspberry Pi)
+        try:
+            if device == 'xr18':
+                # Use sox to trim from seek position and pipe to aplay
+                cmd = ['bash', '-c', f'sox "{filepath}" - trim {position} | aplay -D hw:3,0 -']
+            elif device == 'x32':
+                # Use sox to trim from seek position and pipe to aplay with format
+                cmd = ['bash', '-c', f'sox "{filepath}" - trim {position} | aplay -D hw:XUSB,0 -c 32 -r 48000 -f S32_LE -']
+            else:
+                return jsonify(status='error', message='Invalid device selection'), 400
+        except:
+            # Fallback: restart from beginning if sox is not available
+            if device == 'xr18':
+                cmd = ['aplay', '-D', 'hw:3,0', filepath]
+            elif device == 'x32':
+                cmd = ['aplay', '-D', 'hw:XUSB,0', '-c', '32', '-r', '48000', '-f', 'S32_LE', filepath]
+            else:
+                return jsonify(status='error', message='Invalid device selection'), 400
         
         try:
             proc = subprocess.Popen(cmd, shell=False)

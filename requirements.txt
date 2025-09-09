@@ -1,2 +1,6 @@
 Flask==2.3.3
 
+# Audio tools for seeking functionality (install via system package manager):
+# sudo apt-get install sox
+# sudo apt-get install ffmpeg (alternative)
+

@@ -208,7 +208,7 @@
       
       // Send seek command to backend
       try {
-        await fetch('/seek', {
+        const response = await fetch('/seek', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({ 
@@ -217,8 +217,17 @@
             device: document.querySelector('input[name="device"]:checked').value
           })
         });
+        
+        const result = await response.json();
+        if (result.status === 'error') {
+          console.warn('Seek not fully supported:', result.message);
+          // Update status to show seek limitation
+          document.getElementById('status-play').innerText = 'Playing: ' + currentFile + ' (Seek: restart from beginning)';
+        }
       } catch (error) {
         console.error('Seek failed:', error);
+        // Fallback: just update the visual progress
+        document.getElementById('status-play').innerText = 'Playing: ' + currentFile + ' (Visual seek only)';
       }
     }
 
