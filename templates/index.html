@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Multitrack Recorder</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="section" id="device-section">
+    <h2>Device</h2>
+    <div class="device-options">
+      <label><input type="radio" name="device" value="xr18" checked> XR18</label>
+      <label><input type="radio" name="device" value="x32"> X32</label>
+    </div>
+  </div>
+
+  <div class="section" id="record-section">
+    <h2><img src="/static/icons/mic.svg" style="width:1.2em;vertical-align:middle;margin-right:0.4em;"> Record</h2>
+    <input type="text" id="filename-input" placeholder="Enter file name (optional)" />
+    <button id="btn-record" title="Record">
+      <img src="/static/icons/record.svg" alt="Record" />
+    </button>
+    <button id="btn-pause" disabled title="Pause">
+      <img src="/static/icons/pause.svg" alt="Pause" />
+    </button>
+    <button id="btn-resume" disabled title="Resume">
+      <img src="/static/icons/play.svg" alt="Resume" />
+    </button>
+    <button id="btn-stop-rec" disabled title="Stop & Save">
+      <img src="/static/icons/stop.svg" alt="Stop & Save" />
+    </button>
+    <p id="status-rec"></p>
+  </div>
+
+  <div class="section" id="play-section">
+    <h2><img src="/static/icons/music.svg" style="width:1.2em;vertical-align:middle;margin-right:0.4em;"> Play</h2>
+    <select id="recording-list">
+      {% for file in recordings %}
+        <option value="{{ file }}">{{ file }}</option>
+      {% endfor %}
+    </select>
+    <button id="btn-play" title="Play">
+      <img src="/static/icons/play.svg" alt="Play" />
+    </button>
+    <button id="btn-rewind" disabled title="Go to Start">
+      <img src="/static/icons/rewind.svg" alt="Rewind" />
+    </button>
+    <button id="btn-next" disabled title="Next">
+      <img src="/static/icons/next.svg" alt="Next" />
+    </button>
+    <p id="status-play"></p>
+    <div style="margin-top:10px;">
+      <progress id="progress-bar" value="0" max="1"></progress>
+      <span id="time-display">00:00 / 00:00</span>
+    </div>
+    <!-- <audio id="audio-player" style="display:none;"></audio> -->
+  </div>
+
+  <script>
+    let currentFile = null;
+    let isPlaying = false;
+    let isRecording = false;
+    let playTimer = null;
+    let playStartTime = null;
+    let playDuration = 0;
+
+    // Record
+    document.getElementById('btn-record').onclick = async () => {
+      const btnRecord = document.getElementById('btn-record');
+      const filename = document.getElementById('filename-input').value.trim();
+      const device = document.querySelector('input[name="device"]:checked').value;
+      if (!isRecording) {
+        const res = await fetch('/record', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ filename, device })
+        });
+        const data = await res.json();
+        if (data.status === 'recording') {
+          document.getElementById('status-rec').innerText = 'Recording: ' + data.file;
+          currentFile = data.file;
+          btnRecord.innerText = 'Stop';
+          document.getElementById('btn-pause').disabled = false;
+          document.getElementById('btn-stop-rec').disabled = true;
+          isRecording = true;
+        }
+      } else {
+        // Stop recording
+        await fetch('/stop', { method: 'POST' });
+        document.getElementById('status-rec').innerText = 'Stopped';
+        btnRecord.innerText = 'Record';
+        document.getElementById('btn-pause').disabled = true;
+        document.getElementById('btn-resume').disabled = true;
+        document.getElementById('btn-stop-rec').disabled = true;
+        isRecording = false;
+        // reload file list
+        location.reload();
+      }
+    };
+    document.getElementById('btn-pause').onclick = async () => {
+      await fetch('/pause', { method: 'POST' });
+      document.getElementById('status-rec').innerText = 'Paused';
+      document.getElementById('btn-pause').disabled = true;
+      document.getElementById('btn-resume').disabled = false;
+    };
+    document.getElementById('btn-resume').onclick = async () => {
+      await fetch('/resume', { method: 'POST' });
+      document.getElementById('status-rec').innerText = 'Recording: ' + currentFile;
+      document.getElementById('btn-resume').disabled = true;
+      document.getElementById('btn-pause').disabled = false;
+    };
+    document.getElementById('btn-stop-rec').onclick = async () => {
+      // This button is now always disabled, but keep logic for safety
+      await fetch('/stop', { method: 'POST' });
+      document.getElementById('status-rec').innerText = 'Stopped';
+      document.getElementById('btn-record').innerText = 'Record';
+      document.getElementById('btn-pause').disabled = true;
+      document.getElementById('btn-resume').disabled = true;
+      document.getElementById('btn-stop-rec').disabled = true;
+      isRecording = false;
+      location.reload();
+    };
+
+    // Playback
+    const progressBar = document.getElementById('progress-bar');
+    const timeDisplay = document.getElementById('time-display');
+    
+    function formatTime(sec) {
+      sec = Math.floor(sec);
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+
+    function updateProgressSim() {
+      if (playStartTime === null || playDuration === 0) {
+        progressBar.value = 0;
+        timeDisplay.innerText = `00:00 / 00:00`;
+        return;
+      }
+      const elapsed = Math.min((Date.now() - playStartTime) / 1000, playDuration);
+      progressBar.value = elapsed / playDuration;
+      timeDisplay.innerText = `${formatTime(elapsed)} / ${formatTime(playDuration)}`;
+      if (elapsed >= playDuration) {
+        clearInterval(playTimer);
+        playTimer = null;
+        isPlaying = false;
+        document.getElementById('btn-play').innerText = 'Play';
+        document.getElementById('btn-rewind').disabled = true;
+        document.getElementById('btn-next').disabled = true;
+      }
+    }
+
+    document.getElementById('btn-play').onclick = async () => {
+      const btnPlay = document.getElementById('btn-play');
+      const sel = document.getElementById('recording-list');
+      if (!isPlaying) {
+        currentFile = sel.value;
+        const device = document.querySelector('input[name="device"]:checked').value;
+        // Get duration
+        const durRes = await fetch(`/duration/${encodeURIComponent(currentFile)}`);
+        const durData = await durRes.json();
+        if (!durData.duration) {
+          document.getElementById('status-play').innerText = 'Could not get duration';
+          return;
+        }
+        playDuration = durData.duration;
+        playStartTime = Date.now();
+        updateProgressSim();
+        playTimer = setInterval(updateProgressSim, 200);
+        // POST to /play
+        const res = await fetch('/play', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ filename: currentFile, device })
+        });
+        const data = await res.json();
+        if (data.status === 'playing') {
+          document.getElementById('status-play').innerText = 'Playing: ' + data.file;
+          document.getElementById('btn-rewind').disabled = false;
+          document.getElementById('btn-next').disabled = false;
+          btnPlay.innerText = 'Stop';
+          isPlaying = true;
+        }
+      } else {
+        // Stop playback
+        if (playTimer) { clearInterval(playTimer); playTimer = null; }
+        playStartTime = null;
+        playDuration = 0;
+        await fetch('/stop', { method: 'POST' });
+        document.getElementById('status-play').innerText = 'Stopped';
+        document.getElementById('btn-rewind').disabled = true;
+        document.getElementById('btn-next').disabled = true;
+        btnPlay.innerText = 'Play';
+        isPlaying = false;
+        updateProgressSim();
+      }
+    };
+    document.getElementById('btn-rewind').onclick = async () => {
+      if (playTimer) { clearInterval(playTimer); playTimer = null; }
+      playStartTime = Date.now();
+      updateProgressSim();
+      playTimer = setInterval(updateProgressSim, 200);
+      await fetch('/rewind', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ current: currentFile }) });
+      document.getElementById('status-play').innerText = 'Rewound';
+      document.getElementById('btn-play').innerText = 'Stop';
+      isPlaying = true;
+    };
+    document.getElementById('btn-next').onclick = async () => {
+      const sel = document.getElementById('recording-list');
+      const device = document.querySelector('input[name="device"]:checked').value;
+      const res = await fetch('/next', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ current: currentFile }) });
+      const data = await res.json();
+      if (data.next) {
+        currentFile = data.next;
+        sel.value = currentFile;
+        // Get duration for next file
+        const durRes = await fetch(`/duration/${encodeURIComponent(currentFile)}`);
+        const durData = await durRes.json();
+        if (!durData.duration) {
+          document.getElementById('status-play').innerText = 'Could not get duration';
+          return;
+        }
+        playDuration = durData.duration;
+        playStartTime = Date.now();
+        updateProgressSim();
+        playTimer = setInterval(updateProgressSim, 200);
+        await fetch('/stop', { method: 'POST' });
+        await fetch('/play', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: currentFile, device }) });
+        document.getElementById('status-play').innerText = 'Next: ' + currentFile;
+        document.getElementById('btn-play').innerText = 'Stop';
+        isPlaying = true;
+      }
+    };
+  </script>
+</body>
+</html>
