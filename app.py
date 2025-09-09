@@ -7,6 +7,7 @@ import wave
 import contextlib
 import tempfile
 import uuid
+import time
 
 app = Flask(__name__)
 app.config['RECORDINGS_DIR'] = os.path.join(os.getcwd(), 'recordings')
@@ -216,9 +217,26 @@ def seek_position():
         if not os.path.exists(filepath):
             return jsonify(status='error', message='File not found'), 404
         
-        # Stop current playback
-        proc.send_signal(signal.SIGINT)
-        proc.wait()
+        # Stop current playback more aggressively
+        try:
+            proc.send_signal(signal.SIGINT)
+            # Wait a bit for graceful shutdown
+            proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            # Force kill if it doesn't stop gracefully
+            proc.kill()
+            proc.wait()
+        except:
+            # Process might already be dead
+            pass
+        
+        # Clean up any existing temp file
+        temp_file = task.get('temp_file')
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except:
+                pass
         
         # Calculate seek position in bytes (approximate)
         try:
@@ -259,6 +277,9 @@ def seek_position():
             # Add some debugging
             print(f"Seek command: {' '.join(cmd)}")
             print(f"Seeking to position: {position} seconds")
+            
+            # Small delay to ensure previous process is fully stopped
+            time.sleep(0.1)
             
             proc = subprocess.Popen(cmd, shell=False)
             task['process'] = proc

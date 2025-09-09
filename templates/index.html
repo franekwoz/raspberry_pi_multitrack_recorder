@@ -139,6 +139,8 @@
     
     let isDragging = false;
     let currentPosition = 0;
+    let seekTimeout = null;
+    let lastSeekTime = 0;
     
     function formatTime(sec) {
       sec = Math.floor(sec);
@@ -196,7 +198,7 @@
       seekTo(seekTime);
     }
 
-    // Seek functionality
+    // Seek functionality with debouncing
     async function seekTo(time) {
       if (!isPlaying || playDuration === 0) return;
       
@@ -206,6 +208,20 @@
       // Update visual progress immediately
       updateProgressBar(seekPercentage);
       updateTimeDisplay(time, playDuration);
+      
+      // Debounce seeks to prevent too many rapid requests
+      const now = Date.now();
+      if (now - lastSeekTime < 200) { // 200ms debounce
+        if (seekTimeout) clearTimeout(seekTimeout);
+        seekTimeout = setTimeout(() => performSeek(time), 200);
+        return;
+      }
+      
+      await performSeek(time);
+    }
+    
+    async function performSeek(time) {
+      lastSeekTime = Date.now();
       
       // Send seek command to backend
       try {
@@ -228,7 +244,7 @@
             currentPosition = time;
             console.log('Seek successful to position:', time);
             document.getElementById('status-play').innerText = 'Playing: ' + currentFile + ' (Seeked to ' + formatTime(time) + ')';
-          }, 100);
+          }, 150);
         } else if (result.status === 'error') {
           console.warn('Seek not fully supported:', result.message);
           // Update status to show seek limitation
