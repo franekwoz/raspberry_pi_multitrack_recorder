@@ -221,7 +221,7 @@ def seek_position():
         try:
             proc.send_signal(signal.SIGINT)
             # Wait a bit for graceful shutdown
-            proc.wait(timeout=1)
+            proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             # Force kill if it doesn't stop gracefully
             proc.kill()
@@ -229,6 +229,9 @@ def seek_position():
         except:
             # Process might already be dead
             pass
+        
+        # Additional delay to ensure audio device is released
+        time.sleep(0.5)
         
         # Clean up any existing temp file
         temp_file = task.get('temp_file')
@@ -273,31 +276,45 @@ def seek_position():
             else:
                 return jsonify(status='error', message='Invalid device selection'), 400
         
-        try:
-            # Add some debugging
-            print(f"Seek command: {' '.join(cmd)}")
-            print(f"Seeking to position: {position} seconds")
-            
-            # Small delay to ensure previous process is fully stopped
-            time.sleep(0.1)
-            
-            proc = subprocess.Popen(cmd, shell=False)
-            task['process'] = proc
-            task['mode'] = 'play'
-            
-            # Store temp file path for cleanup
-            task['temp_file'] = temp_filepath
-            
-            return jsonify(status='seeking', position=position, file=filename)
-        except Exception as e:
-            # Clean up temp file if process creation fails
-            if os.path.exists(temp_filepath):
-                try:
-                    os.remove(temp_filepath)
-                except:
-                    pass
-            print(f"Seek error: {str(e)}")
-            return jsonify(status='error', message=f'Seek failed: {str(e)}'), 500
+        # Try to start the new process with retry mechanism
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Add some debugging
+                print(f"Seek command (attempt {attempt + 1}): {' '.join(cmd)}")
+                print(f"Seeking to position: {position} seconds")
+                
+                proc = subprocess.Popen(cmd, shell=False)
+                
+                # Give it a moment to start and check if it's still running
+                time.sleep(0.2)
+                if proc.poll() is None:  # Process is still running
+                    task['process'] = proc
+                    task['mode'] = 'play'
+                    task['temp_file'] = temp_filepath
+                    return jsonify(status='seeking', position=position, file=filename)
+                else:
+                    # Process exited immediately, might be device busy
+                    print(f"Process exited immediately, attempt {attempt + 1}")
+                    if attempt < max_retries - 1:
+                        time.sleep(0.5)  # Wait longer before retry
+                        continue
+                    else:
+                        return jsonify(status='error', message='Audio device busy, please try again'), 500
+                        
+            except Exception as e:
+                print(f"Seek attempt {attempt + 1} failed: {str(e)}")
+                if attempt < max_retries - 1:
+                    time.sleep(0.5)
+                    continue
+                else:
+                    # Clean up temp file if all attempts failed
+                    if os.path.exists(temp_filepath):
+                        try:
+                            os.remove(temp_filepath)
+                        except:
+                            pass
+                    return jsonify(status='error', message=f'Seek failed after {max_retries} attempts: {str(e)}'), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
